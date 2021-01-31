@@ -1,0 +1,144 @@
+
+#########################################################################
+#####                   Exercice  Aggréger des restaurants         #####
+
+# Q : La répartition des restaurants par quartier ?
+# R :
+
+repart_resto_borough = { $group : {"_id" : "$borough", "nb_restaurant" : {$sum : 1}} }
+tri = { $sort : {"_id" : 1} }
+
+db.restaurants.aggregate([ repart_resto_borough, tri ])
+
+
+# Q : La répartition des restaurants dont la dernière inspection (la plus récente, donc la première de la liste) a donné un grade "C" par quartier (key : "grade") ?
+
+match_grade_C = { $match : {"grades.0.grade":"C"} }
+proj = { $project : {"name":1, "borough":1, "_id":0 } }
+repart_resto_borough = { $group : {"_id" : "$borough", "nb_restaurant" : {$sum : 1}} }
+tri = { $sort : {"_id" : 1} }
+
+db.restaurants.aggregate( [match_grade_C, proj, repart_resto_borough, tri] )
+
+# Si vous voulez rajouter un autre stage, c'est possible : par ex le total
+
+total = { $group : {"_id" : "total", "nb_restaurant" : {$sum : "$nb_restaurant"}} }
+db.restaurants.aggregate( [match_grade_C, proj, repart_resto_borough, tri, total ] )
+
+# Ce que je peux facilement le faire :
+db.restaurants.count({"grades.0.grade":"C"})
+Ou
+total_220 = { $group : {"_id" : null, "total" : {$sum : 1} } }
+db.restaurants.aggregate( [ match_grade_C, total_220 ] )
+{"_id" : null, "total" : 220}
+
+
+Q : Calculer le score moyen des resto par quartier et trier par score décroissant ?
+
+db.restaurants.findOne()
+# Rq : Les scores se trouvent ds une liste (on ne peux pas calculer la moy sur une liste) !
+# unwind() est l'opérateur parfait parcq il permet de retirer de la liste les elements souhaités
+
+eclater_liste = {$unwind : "$grades"}
+mean_quartier = { $group : {"_id" : "$borough", "moyenne" : {$avg : "$grades.score"} } }
+tri = { $sort : { "moyenne" : -1 } }
+db.restaurants.aggregate( [ eclater_liste, mean_quartier, tri ] )
+
+
+{ "_id" : "Queens", "moyenne" : 11.634865110930088 }
+{ "_id" : "Brooklyn", "moyenne" : 11.447723132969035 }
+{ "_id" : "Manhattan", "moyenne" : 11.41823125728344 }
+{ "_id" : "Staten Island", "moyenne" : 11.370957711442786 }
+{ "_id" : "Bronx", "moyenne" : 11.036186099942562 }
+{ "_id" : "Missing", "moyenne" : 9.632911392405063 }
+
+
+
+db.restaurants.aggregate([ { $group : {"_id" : "borough", "total" : {$sum : 1}} }, {$sort : {"_id" : 1}} ])
+
+db.restaurants.aggregate([{$unwind : "$grades"}, {$limit : 4}]).pretty()
+
+db.restaurants.findOne({}, {"gardes" : 1})
+
+
+#########################################################################
+#####                   Exercice  Aggréger des transactions         #####
+Q : Créer une collection "transactions" à partir du fichier transactions.json et répondre aux questions suivantes :
+mongoimport -d db_agg -c transactions --drop --file "C:/Users/bejao/OneDrive/DB/NoSQL/MongoDB/2 ProjetAggregation/fichiersApprenants/transactions.json"
+
+Q-1. Calculer le montant total des paiements ?
+# S : 410 * 3 = 1230
+db.transactions.aggregate([{
+    $group: {
+        _id: '',
+        montant_total: { $sum: '$Payment.Total' }
+    }
+ }])
+
+
+Q-2. Calculer le montant total des paniers ?
+# Indice : key : Panier.price = 410*4 = 1640
+# La forme simplifiée
+db.transactions.aggregate([
+   {
+     $project: {
+       montant: { $sum: "$Panier.price"},
+     }
+   }
+])
+# La forme avec l'aggregation
+eclater_liste = {"$unwind": "$Panier" }
+total_par_panier = {"$group": {"_id": "$TransactionId", "somme": { "$sum": "$Panier.price" } }}
+total_des_paniers = {"$group": {"_id": "total", "total": { "$sum": "$somme" } }}
+db.transactions.aggregate([ eclater_liste, repart_panier, total_des_paniers ])
+
+
+Q-3. Calculer le total des payments (Payment.Total) par type de payment (Payment.Type) ?
+
+db.transactions.aggregate([
+     {
+       $group:
+         {
+          _id: "$Payment.Type",
+           totalAmount: { $sum: "$Payment.Total" },
+           count: { $sum: 1 }
+         }
+     }
+])
+
+Q-4. trouver le prix le plus elevé (Transaction.price) ?
+# Indice : 210
+# Transaction.price is an array. So find the array containing maximum price and then extract
+# the max price from the array with another $max.
+
+db.transactions.aggregate([
+    {
+        $group:
+        {
+            _id: '',
+            maxPrice: {$max: {$max: "$Panier.price"}}
+        }
+    }
+])
+
+Q-5. Trouver l'Id le plus élevé.
+
+db.transactions.aggregate([
+    {
+        $group:
+        {
+            _id: '',
+            maxId: {$max: "$Id"}
+        }
+    }
+])
+
+
+#########################################################################
+#####       					 	         distinct		    	               	 	#####
+# Q : Age unique => distinct ?
+db.people.distinct("age")
+# S : [ 20, 35, 60 ]
+Q : Peut-on faire un distinct sur plusieurs key ?
+db.people.distinct("name", "age")
+# R : Ce n'est pas possible de faire un distinct sur plusieurs key => Il faut passer par map reduce !
